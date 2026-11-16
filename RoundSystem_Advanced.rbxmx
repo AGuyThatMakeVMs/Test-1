@@ -1,0 +1,590 @@
+<?xml version="1.0" encoding="utf-8"?>
+<roblox version="4"><Item class="Model" referent="RBX0"><Properties><string name="Name">RoundSystem</string></Properties><Item class="Script" referent="RBX1"><Properties><string name="Name">README</string><bool name="Disabled">true</bool><ProtectedString name="Source"><![CDATA[--[[
+=====================================================================
+  README  |  CLASSIC ROUND SYSTEM (Roblox 2008-2010 style)
+  DO NOT EDIT THIS SCRIPT. It is disabled and only works as a guide.
+=====================================================================
+
+HOW IT WORKS
+   Intermission -> a RANDOM map is picked -> players are teleported to
+   RANDOM spawn points -> the round timer runs -> the round ends, the
+   map is removed and everyone returns to the lobby -> repeat.
+
+   The map is chosen at RANDOM from your Maps folder every round.
+   If you have 2 or more maps, the same map never plays twice in a row.
+
+1) INSTALL
+   - Keep the "RoundSystem" model inside WORKSPACE.
+   - You do not need to move anything. When you press Play it installs
+     itself: it moves the Maps folder to ServerStorage, gives the
+     interface to every player and builds a lobby if you have none.
+
+2) WHERE TO PUT YOUR MAPS
+   - Put each map INSIDE:  RoundSystem > Maps
+   - Each map must be 1 Model (select the parts and use Group).
+   - If you already have ServerStorage > Maps, you can use it too.
+   - If the Maps folder is empty, two test maps are created for you.
+   - Every round, one map is picked at random and cloned into the
+     Workspace. When the round ends, the clone is deleted.
+
+3) SPAWN POINTS (where players appear during the round)
+   - Inside each map, create Parts named EXACTLY:  SpawnPoint
+   - Use as many as you want, anywhere in the map.
+   - Keep them Anchored. They become invisible during the game.
+   - Players are placed on RANDOM spawn points, spread out as much
+     as possible (nobody shares a spawn until all of them are used).
+   - A map with no SpawnPoint falls back to any part of that map.
+
+4) HOW TO CONFIGURE (no coding needed)
+   - Open  RoundSystem > Config  and select a value. Then change the
+     "Value" property in the Properties window:
+       IntermissionTime  (default 15)   seconds between rounds
+       RoundTime         (default 120)  seconds of each round / map
+       MinPlayers        (default 1)    players needed to start
+                                        (use 2 or more in your game)
+       EndScreenTime     (default 5)    seconds of the "Round over" text
+       EndWhenOneLeft    (default off)  ends the round early when only
+                                        1 player is alive (2+ players)
+
+5) INTERFACE AND TIPS
+   - The original interface layout is preserved: top status panel and
+     bottom rotating Tips bar.
+   - To edit tips, open RoundSystem > RoundGui > RoundGuiScript and
+     edit the TIPS list. TIP_INTERVAL controls the delay.
+
+6) ADVANCED SETTINGS
+   Open RoundSystem > Advanced and edit Value in Properties:
+     RandomizeSpawns       randomizes spawn-point order (default true)
+     AvoidRepeatingMaps    avoids the previous map when possible
+     AutoCreateDemoMaps    creates two sample maps if Maps is empty
+     SpawnHeightOffset     extra height above spawn points (1 to 20)
+     ReturnPlayersToLobby  reloads players after each round
+
+7) WHERE TO PUT A BUTTON
+   - This system has no buttons by default.
+   - To add one, put your button (TextButton) INSIDE:
+       RoundSystem > RoundGui   (this is the interface ScreenGui)
+   - Do it in edit mode, before pressing Play.
+
+8) TEST AND PUBLISH
+   - Press Play: after the intermission you spawn on a random point
+     of a random map.
+   - Before publishing your game, set MinPlayers to 2 or more.
+   - To publish this MODEL: right-click RoundSystem in the Explorer,
+     choose "Save to Roblox...", turn on "Distribute on Creator Store"
+     and press Submit.
+   - To publish your GAME: File > Publish to Roblox, then set it to
+     Public in create.roblox.com > Settings > Privacy.
+
+Troubleshooting: if nothing happens, check that the model is in the
+Workspace and that each map is a Model with Parts named SpawnPoint.
+]]
+]]></ProtectedString></Properties></Item><Item class="Configuration" referent="RBX2"><Properties><string name="Name">Config</string></Properties><Item class="IntValue" referent="RBX3"><Properties><string name="Name">IntermissionTime</string><int64 name="Value">15</int64></Properties></Item><Item class="IntValue" referent="RBX4"><Properties><string name="Name">RoundTime</string><int64 name="Value">120</int64></Properties></Item><Item class="IntValue" referent="RBX5"><Properties><string name="Name">MinPlayers</string><int64 name="Value">1</int64></Properties></Item><Item class="IntValue" referent="RBX6"><Properties><string name="Name">EndScreenTime</string><int64 name="Value">5</int64></Properties></Item><Item class="BoolValue" referent="RBX7"><Properties><string name="Name">EndWhenOneLeft</string><bool name="Value">false</bool></Properties></Item></Item><Item class="Folder" referent="RBX12"><Properties><string name="Name">Advanced</string></Properties>
+<Item class="BoolValue" referent="RBX13"><Properties><string name="Name">RandomizeSpawns</string><bool name="Value">true</bool></Properties></Item>
+<Item class="BoolValue" referent="RBX14"><Properties><string name="Name">AvoidRepeatingMaps</string><bool name="Value">true</bool></Properties></Item>
+<Item class="BoolValue" referent="RBX15"><Properties><string name="Name">AutoCreateDemoMaps</string><bool name="Value">true</bool></Properties></Item>
+<Item class="NumberValue" referent="RBX16"><Properties><string name="Name">SpawnHeightOffset</string><double name="Value">3.5</double></Properties></Item>
+<Item class="BoolValue" referent="RBX17"><Properties><string name="Name">ReturnPlayersToLobby</string><bool name="Value">true</bool></Properties></Item>
+</Item><Item class="Script" referent="RBX8"><Properties><string name="Name">RoundSystem</string><ProtectedString name="Source"><![CDATA[--[[
+  CLASSIC ROUND SYSTEM - server script
+  Keep the RoundSystem model inside Workspace. Settings live in
+  RoundSystem > Config (see the README script).
+]]
+
+local Players = game:GetService("Players")
+local RS = game:GetService("ReplicatedStorage")
+local SS = game:GetService("ServerStorage")
+
+------------------------------------------------------------------
+-- SETTINGS (read from RoundSystem > Config, with safe defaults)
+------------------------------------------------------------------
+local pack = script.Parent
+local config = pack:FindFirstChild("Config")
+local advanced = pack:FindFirstChild("Advanced")
+
+local function advancedSetting(name, default)
+	local obj = advanced and advanced:FindFirstChild(name)
+	if obj and obj:IsA("ValueBase") then
+		return obj.Value
+	end
+	return default
+end
+
+local function setting(name, default)
+	local obj = config and config:FindFirstChild(name)
+	if obj and obj:IsA("ValueBase") then
+		return obj.Value
+	end
+	return default
+end
+
+------------------------------------------------------------------
+-- AUTOMATIC INSTALL
+------------------------------------------------------------------
+local Maps = SS:FindFirstChild("Maps")
+local packMaps = pack:FindFirstChild("Maps")
+if packMaps then
+	if Maps then
+		for _, m in ipairs(packMaps:GetChildren()) do
+			m.Parent = Maps
+		end
+	else
+		packMaps.Parent = SS
+		Maps = packMaps
+	end
+end
+if not Maps then
+	Maps = Instance.new("Folder")
+	Maps.Name = "Maps"
+	Maps.Parent = SS
+end
+
+local guiTemplate = SS:FindFirstChild("RoundGuiTemplate")
+if not guiTemplate then
+	local g = pack:FindFirstChild("RoundGui")
+	if g then
+		g.Name = "RoundGuiTemplate"
+		g.Parent = SS
+		guiTemplate = g
+	end
+end
+
+local function giveGui(player)
+	if not guiTemplate then
+		return
+	end
+	local playerGui = player:WaitForChild("PlayerGui")
+	if not playerGui:FindFirstChild("RoundGui") then
+		local g = guiTemplate:Clone()
+		g.Name = "RoundGui"
+		g.Parent = playerGui
+	end
+end
+
+Players.PlayerAdded:Connect(giveGui)
+for _, p in ipairs(Players:GetPlayers()) do
+	task.spawn(giveGui, p)
+end
+
+local leftover = workspace:FindFirstChild("CurrentMap")
+if leftover then
+	leftover:Destroy()
+end
+
+------------------------------------------------------------------
+-- VALUES READ BY THE INTERFACE
+------------------------------------------------------------------
+local function newValue(class, name, default)
+	local old = RS:FindFirstChild(name)
+	if old then
+		old:Destroy()
+	end
+	local v = Instance.new(class)
+	v.Name = name
+	v.Value = default
+	v.Parent = RS
+	return v
+end
+
+local StatusValue = newValue("StringValue", "RoundStatus", "Waiting for players...")
+local TimerValue = newValue("IntValue", "RoundTimer", 0)
+local MapValue = newValue("StringValue", "RoundMap", "")
+local AliveValue = newValue("IntValue", "RoundAlive", 0)
+
+local function setStatus(text, t)
+	StatusValue.Value = text
+	TimerValue.Value = t or 0
+end
+
+------------------------------------------------------------------
+-- LOBBY (only built if the place has no SpawnLocation)
+------------------------------------------------------------------
+if not workspace:FindFirstChildWhichIsA("SpawnLocation", true) then
+	local lobby = Instance.new("Folder")
+	lobby.Name = "Lobby"
+	lobby.Parent = workspace
+
+	local base = Instance.new("Part")
+	base.Name = "LobbyBase"
+	base.Anchored = true
+	base.Size = Vector3.new(60, 2, 60)
+	base.Position = Vector3.new(0, 50, 0)
+	base.BrickColor = BrickColor.new("Medium stone grey")
+	base.Parent = lobby
+
+	local sp = Instance.new("SpawnLocation")
+	sp.Anchored = true
+	sp.Size = Vector3.new(12, 1, 12)
+	sp.Position = Vector3.new(0, 51.5, 0)
+	sp.Neutral = true
+	sp.Parent = lobby
+end
+
+------------------------------------------------------------------
+-- MAP LIST
+------------------------------------------------------------------
+local function getValidMaps()
+	local list = {}
+	for _, m in ipairs(Maps:GetChildren()) do
+		if m:IsA("Model") or m:IsA("Folder") then
+			table.insert(list, m)
+		end
+	end
+	return list
+end
+
+-- two test maps (only when the Maps folder has no maps at all)
+if #getValidMaps() == 0 and advancedSetting("AutoCreateDemoMaps", true) then
+	local demos = {
+		{ name = "Test Map A", color = "Bright green", x = 300 },
+		{ name = "Test Map B", color = "Bright blue", x = -300 },
+	}
+	for _, d in ipairs(demos) do
+		local m = Instance.new("Model")
+		m.Name = d.name
+
+		local floor = Instance.new("Part")
+		floor.Name = "Floor"
+		floor.Anchored = true
+		floor.Size = Vector3.new(120, 2, 120)
+		floor.Position = Vector3.new(d.x, 0, 0)
+		floor.BrickColor = BrickColor.new(d.color)
+		floor.Parent = m
+
+		for i = 1, 6 do
+			local s = Instance.new("Part")
+			s.Name = "SpawnPoint"
+			s.Anchored = true
+			s.Size = Vector3.new(6, 1, 6)
+			s.Position = Vector3.new(d.x + math.cos(i * 1.05) * 40, 2, math.sin(i * 1.05) * 40)
+			s.Parent = m
+		end
+		m.Parent = Maps
+	end
+end
+
+local lastMap = nil
+
+-- picks a RANDOM map, never the same one twice in a row (if 2+ maps)
+local function pickMap()
+	local list = getValidMaps()
+	if #list == 0 then
+		return nil
+	end
+	if advancedSetting("AvoidRepeatingMaps", true) and #list > 1 and lastMap then
+		local filtered = {}
+		for _, m in ipairs(list) do
+			if m ~= lastMap then
+				table.insert(filtered, m)
+			end
+		end
+		list = filtered
+	end
+	local chosen = list[math.random(#list)]
+	lastMap = chosen
+	return chosen
+end
+
+-- returns the SpawnPoints of a map in RANDOM order
+local function getSpawns(map)
+	local list = {}
+	for _, d in ipairs(map:GetDescendants()) do
+		if d:IsA("BasePart") and d.Name == "SpawnPoint" then
+			d.Transparency = 1
+			d.CanCollide = false
+			table.insert(list, d)
+		end
+	end
+	if #list == 0 then
+		for _, d in ipairs(map:GetDescendants()) do
+			if d:IsA("BasePart") then
+				table.insert(list, d)
+				break
+			end
+		end
+	end
+	if advancedSetting("RandomizeSpawns", true) then
+		for i = #list, 2, -1 do
+			local j = math.random(i)
+			list[i], list[j] = list[j], list[i]
+		end
+	end
+	return list
+end
+
+------------------------------------------------------------------
+-- ROUND STATE
+------------------------------------------------------------------
+local alive = {}
+
+local function countAlive()
+	local n = 0
+	for _ in pairs(alive) do
+		n = n + 1
+	end
+	return n
+end
+
+local function updateAlive()
+	AliveValue.Value = countAlive()
+end
+
+local function sendToSpawn(player, spawn)
+	local char = player.Character
+	if not char then
+		return false
+	end
+	local hum = char:FindFirstChildOfClass("Humanoid")
+	local hrp = char:FindFirstChild("HumanoidRootPart")
+	if not hum or not hrp or hum.Health <= 0 then
+		return false
+	end
+
+	local offset = advancedSetting("SpawnHeightOffset", 3.5)
+	local pos = spawn.Position + Vector3.new(0, spawn.Size.Y / 2 + math.clamp(offset, 1, 20), 0)
+	char:PivotTo(CFrame.new(pos))
+
+	alive[player] = true
+	hum.Died:Once(function()
+		alive[player] = nil
+		updateAlive()
+	end)
+	return true
+end
+
+Players.PlayerRemoving:Connect(function(p)
+	alive[p] = nil
+	updateAlive()
+end)
+
+local function runRound()
+	local template = pickMap()
+	if not template then
+		warn("[RoundSystem] No maps found in the Maps folder.")
+		task.wait(5)
+		return
+	end
+
+	local map = template:Clone()
+	map.Name = "CurrentMap"
+	map.Parent = workspace
+
+	local spawns = getSpawns(map)
+	if #spawns == 0 then
+		warn("[RoundSystem] Map '" .. template.Name .. "' has no parts. Skipping it.")
+		map:Destroy()
+		task.wait(5)
+		return
+	end
+
+	MapValue.Value = template.Name
+	alive = {}
+
+	local started = 0
+	for i, p in ipairs(Players:GetPlayers()) do
+		local spawn = spawns[((i - 1) % #spawns) + 1]
+		if sendToSpawn(p, spawn) then
+			started = started + 1
+		end
+	end
+	updateAlive()
+
+	local endWhenOneLeft = setting("EndWhenOneLeft", false)
+	for t = setting("RoundTime", 120), 1, -1 do
+		setStatus("Round in progress", t)
+		task.wait(1)
+
+		local n = countAlive()
+		if n == 0 or #Players:GetPlayers() == 0 then
+			break
+		end
+		if endWhenOneLeft and started >= 2 and n <= 1 then
+			break
+		end
+	end
+
+	-- round over
+	local n = countAlive()
+	local text
+	if n == 1 and started >= 2 then
+		local winner
+		for p in pairs(alive) do
+			winner = p
+		end
+		text = "Round over! Winner: " .. (winner and winner.Name or "?")
+	elseif n == 0 then
+		text = "Round over! Nobody survived."
+	else
+		text = "Round over! Survivors: " .. n
+	end
+	setStatus(text, 0)
+	task.wait(setting("EndScreenTime", 5))
+
+	-- everyone back to the lobby, then remove the map
+	alive = {}
+	updateAlive()
+	if advancedSetting("ReturnPlayersToLobby", true) then
+		for _, p in ipairs(Players:GetPlayers()) do
+			pcall(function()
+				p:LoadCharacter()
+			end)
+		end
+	end
+	map:Destroy()
+	MapValue.Value = ""
+end
+
+------------------------------------------------------------------
+-- MAIN LOOP
+------------------------------------------------------------------
+while true do
+	while #Players:GetPlayers() < setting("MinPlayers", 1) do
+		setStatus("Waiting for players...", 0)
+		task.wait(1)
+	end
+
+	for i = setting("IntermissionTime", 15), 1, -1 do
+		setStatus("Intermission", i)
+		task.wait(1)
+		if #Players:GetPlayers() < setting("MinPlayers", 1) then
+			break
+		end
+	end
+
+	if #Players:GetPlayers() >= setting("MinPlayers", 1) then
+		runRound()
+	end
+end
+]]></ProtectedString></Properties></Item><Item class="Folder" referent="RBX9"><Properties><string name="Name">Maps</string></Properties></Item><Item class="ScreenGui" referent="RBX10"><Properties><string name="Name">RoundGui</string><bool name="ResetOnSpawn">false</bool></Properties><Item class="LocalScript" referent="RBX11"><Properties><string name="Name">RoundGuiScript</string><ProtectedString name="Source"><![CDATA[-- CLASSIC ROUND SYSTEM - interface (client)
+-- Edit the TIPS list below to change the tips shown at the bottom.
+
+local RS = game:GetService("ReplicatedStorage")
+local TweenService = game:GetService("TweenService")
+
+local StatusValue = RS:WaitForChild("RoundStatus")
+local TimerValue = RS:WaitForChild("RoundTimer")
+local MapValue = RS:WaitForChild("RoundMap")
+local AliveValue = RS:WaitForChild("RoundAlive")
+
+local TIPS = {
+	"A new map is picked at random every round, so stay ready!",
+	"You spawn at a random point of the map.",
+	"Keep an eye on the timer in the top panel.",
+	"If you fall, you go back to the lobby until the next round.",
+	"Stay away from the edges of the map.",
+	"Team up with your friends and have fun!",
+	"Learn the map layout before the timer gets low.",
+	"Watch the alive counter to know how the round is going.",
+	"Try different maps to discover new routes.",
+	"Use the intermission to get ready for the next round.",
+	"Stay alert: the next map can be completely different!",
+	"Spread out when the round starts so everyone has room.",
+	"Survive until the timer ends to become a round survivor.",
+}
+local TIP_INTERVAL = 8
+
+local FONT = Enum.Font.Arial
+local FONT_BOLD = Enum.Font.ArialBold
+local WHITE = Color3.new(1, 1, 1)
+local RED = Color3.fromRGB(255, 90, 90)
+
+local gui = script.Parent
+
+local function makeBox(size, pos, anchor)
+	local f = Instance.new("Frame")
+	f.Size = size
+	f.Position = pos
+	f.AnchorPoint = anchor
+	f.BackgroundColor3 = Color3.new(0, 0, 0)
+	f.BackgroundTransparency = 0.4
+	f.BorderSizePixel = 2
+	f.BorderColor3 = WHITE
+	f.Parent = gui
+	return f
+end
+
+local function makeLabel(parent, size, pos, font, maxText)
+	local l = Instance.new("TextLabel")
+	l.Size = size
+	l.Position = pos
+	l.BackgroundTransparency = 1
+	l.TextColor3 = WHITE
+	l.TextStrokeTransparency = 0.5
+	l.Font = font
+	l.TextScaled = true
+	l.Text = ""
+	l.Parent = parent
+
+	local c = Instance.new("UITextSizeConstraint")
+	c.MaxTextSize = maxText
+	c.Parent = l
+	return l
+end
+
+-- top panel: status + map / time / alive
+local top = makeBox(UDim2.new(0.6, 0, 0, 64), UDim2.new(0.5, 0, 0, 8), Vector2.new(0.5, 0))
+local topLimit = Instance.new("UISizeConstraint")
+topLimit.MinSize = Vector2.new(240, 64)
+topLimit.MaxSize = Vector2.new(380, 64)
+topLimit.Parent = top
+
+local statusLabel = makeLabel(top, UDim2.new(1, -8, 0.5, -2), UDim2.new(0, 4, 0, 2), FONT_BOLD, 20)
+local infoLabel = makeLabel(top, UDim2.new(1, -8, 0.5, -4), UDim2.new(0.5, 0, 0.5, 0), FONT, 16)
+infoLabel.AnchorPoint = Vector2.new(0.5, 0)
+infoLabel.Position = UDim2.new(0.5, 0, 0.5, 0)
+
+-- bottom bar: tips
+local tipBox = makeBox(UDim2.new(0.8, 0, 0, 30), UDim2.new(0.5, 0, 1, -10), Vector2.new(0.5, 1))
+local tipLimit = Instance.new("UISizeConstraint")
+tipLimit.MinSize = Vector2.new(240, 30)
+tipLimit.MaxSize = Vector2.new(520, 30)
+tipLimit.Parent = tipBox
+local tipLabel = makeLabel(tipBox, UDim2.new(1, -8, 1, -4), UDim2.new(0, 4, 0, 2), FONT, 16)
+
+local function fmt(t)
+	return string.format("%d:%02d", math.floor(t / 60), t % 60)
+end
+
+local function refresh()
+	statusLabel.Text = StatusValue.Value
+
+	local inRound = MapValue.Value ~= ""
+	local parts = {}
+	if inRound then
+		table.insert(parts, "Map: " .. MapValue.Value)
+	end
+	table.insert(parts, "Time: " .. fmt(TimerValue.Value))
+	if inRound then
+		table.insert(parts, "Alive: " .. AliveValue.Value)
+	end
+	infoLabel.Text = table.concat(parts, "  |  ")
+
+	local urgent = inRound and TimerValue.Value > 0 and TimerValue.Value <= 10
+	infoLabel.TextColor3 = urgent and RED or WHITE
+end
+
+StatusValue.Changed:Connect(refresh)
+TimerValue.Changed:Connect(refresh)
+MapValue.Changed:Connect(refresh)
+AliveValue.Changed:Connect(refresh)
+refresh()
+
+-- rotating tips (random order, never the same twice in a row)
+task.spawn(function()
+	local last = 0
+	while true do
+		local idx = math.random(#TIPS)
+		if #TIPS > 1 then
+			while idx == last do
+				idx = math.random(#TIPS)
+			end
+		end
+		last = idx
+
+		tipLabel.Text = "Tips: " .. TIPS[idx]
+		tipLabel.TextTransparency = 1
+		TweenService:Create(tipLabel, TweenInfo.new(0.4), { TextTransparency = 0 }):Play()
+		task.wait(TIP_INTERVAL)
+	end
+end)
+]]></ProtectedString></Properties></Item></Item></Item></roblox>
